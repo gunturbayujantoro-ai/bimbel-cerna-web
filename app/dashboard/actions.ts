@@ -4,6 +4,10 @@ import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { redirect } from 'next/navigation'
 
+function redirectAdminView(view: 'students' | 'packages' | 'links', message: string): never {
+  redirect(`/dashboard?view=${view}&adminMessage=${encodeURIComponent(message)}`)
+}
+
 async function requireAdmin() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -60,7 +64,7 @@ export async function createPrivatePackage(formData: FormData) {
   const sessions = Number(rawSessions)
 
   if (!name || !subject || !rawPrice || !rawSessions || !Number.isFinite(price) || price < 0 || !Number.isInteger(sessions) || sessions < 1) {
-    redirect('/dashboard?adminMessage=Data%20paket%20belum%20valid')
+    redirectAdminView('packages', 'Data paket belum valid')
   }
 
   const { error } = await supabase.from('private_packages').insert({
@@ -71,8 +75,8 @@ export async function createPrivatePackage(formData: FormData) {
     sessions,
   })
 
-  if (error) redirect(`/dashboard?adminMessage=${encodeURIComponent(error.message)}`)
-  redirect('/dashboard?adminMessage=Paket%20berhasil%20ditambahkan')
+  if (error) redirectAdminView('packages', error.message)
+  redirectAdminView('packages', 'Paket berhasil ditambahkan')
 }
 
 export async function createRegistrationLink(formData: FormData) {
@@ -86,8 +90,8 @@ export async function createRegistrationLink(formData: FormData) {
     created_by: user.id,
   })
 
-  if (error) redirect(`/dashboard?adminMessage=${encodeURIComponent(error.message)}`)
-  redirect('/dashboard?adminMessage=Tautan%20pendaftaran%20berhasil%20dibuat')
+  if (error) redirectAdminView('links', error.message)
+  redirectAdminView('links', 'Tautan pendaftaran berhasil dibuat')
 }
 
 export async function createStudentAccount(formData: FormData) {
@@ -99,14 +103,14 @@ export async function createStudentAccount(formData: FormData) {
   const registrationId = String(formData.get('registrationId') ?? '').trim()
 
   if (!fullName || fullName.length > 150 || !/^\S+@\S+\.\S+$/.test(email) || email.length > 254 || password.length < 8 || !school || school.length > 180) {
-    redirect('/dashboard?adminMessage=Data%20akun%20tidak%20valid.%20Password%20minimal%208%20karakter.')
+    redirectAdminView('students', 'Data akun tidak valid. Password minimal 8 karakter.')
   }
 
   let adminClient
   try {
     adminClient = createAdminClient()
   } catch {
-    redirect('/dashboard?adminMessage=SUPABASE_SERVICE_ROLE_KEY%20belum%20dikonfigurasi')
+    redirectAdminView('students', 'SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi')
   }
 
   if (registrationId) {
@@ -117,7 +121,7 @@ export async function createStudentAccount(formData: FormData) {
       .single()
 
     if (registrationError || !registration || registration.student_profile_id) {
-      redirect('/dashboard?adminMessage=Pendaftaran%20sudah%20terhubung%20atau%20tidak%20ditemukan')
+      redirectAdminView('students', 'Pendaftaran sudah terhubung atau tidak ditemukan')
     }
   }
 
@@ -129,7 +133,7 @@ export async function createStudentAccount(formData: FormData) {
   })
 
   if (error || !data.user) {
-    redirect(`/dashboard?adminMessage=${encodeURIComponent(error?.message ?? 'Akun siswa gagal dibuat')}`)
+    redirectAdminView('students', error?.message ?? 'Akun siswa gagal dibuat')
   }
 
   const { error: profileError } = await adminClient.from('profiles').upsert({
@@ -151,7 +155,7 @@ export async function createStudentAccount(formData: FormData) {
 
   if (profileError || lookupError || !profile?.student_id) {
     await adminClient.auth.admin.deleteUser(data.user.id)
-    redirect('/dashboard?adminMessage=Profil%20gagal%20dibuat.%20Pastikan%20SQL%20ID%20siswa%20sudah%20dijalankan.')
+    redirectAdminView('students', 'Profil gagal dibuat. Pastikan SQL ID siswa sudah dijalankan.')
   }
 
   if (registrationId) {
@@ -165,7 +169,7 @@ export async function createStudentAccount(formData: FormData) {
 
     if (linkError || !linkedRegistration) {
       await adminClient.auth.admin.deleteUser(data.user.id)
-      redirect('/dashboard?adminMessage=Pendaftaran%20gagal%20dihubungkan%20ke%20akun%20siswa')
+      redirectAdminView('students', 'Pendaftaran gagal dihubungkan ke akun siswa')
     }
 
     const { error: scheduleError } = await adminClient
@@ -176,11 +180,11 @@ export async function createStudentAccount(formData: FormData) {
     if (scheduleError) {
       await adminClient.from('public_registrations').update({ student_profile_id: null }).eq('id', registrationId)
       await adminClient.auth.admin.deleteUser(data.user.id)
-      redirect('/dashboard?adminMessage=Jadwal%20gagal%20dihubungkan%20ke%20akun%20siswa')
+      redirectAdminView('students', 'Jadwal gagal dihubungkan ke akun siswa')
     }
   }
 
-  redirect(`/dashboard?adminMessage=Akun%20siswa%20berhasil%20dibuat&newStudentId=${encodeURIComponent(profile.student_id)}${registrationId ? '&scheduleLinked=1' : ''}`)
+  redirect(`/dashboard?view=students&adminMessage=${encodeURIComponent('Akun siswa berhasil dibuat')}&newStudentId=${encodeURIComponent(profile.student_id)}${registrationId ? '&scheduleLinked=1' : ''}`)
 }
 
 export async function activateStudent(formData: FormData) {
@@ -193,7 +197,7 @@ export async function activateStudent(formData: FormData) {
   const startDate = new Date(`${activeFrom}T00:00:00.000Z`)
 
   if (!studentId || !paymentReceived || !/^\d{4}-\d{2}-\d{2}$/.test(activeFrom) || Number.isNaN(startDate.getTime()) || startDate.toISOString().slice(0, 10) !== activeFrom || !allowedDurations.includes(months)) {
-    redirect('/dashboard?adminMessage=Data%20masa%20aktif%20tidak%20valid')
+    redirectAdminView('students', 'Data masa aktif tidak valid')
   }
 
   const targetMonth = startDate.getUTCMonth() + months
@@ -211,7 +215,7 @@ export async function activateStudent(formData: FormData) {
     .eq('role', 'student')
     .single()
 
-  if (studentError || !student) redirect('/dashboard?adminMessage=Siswa%20tidak%20ditemukan')
+  if (studentError || !student) redirectAdminView('students', 'Siswa tidak ditemukan')
 
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
   const keepsCurrentPeriod = student.is_active && student.active_from && student.active_until >= today && activeFrom > student.active_until
@@ -222,8 +226,8 @@ export async function activateStudent(formData: FormData) {
     .eq('id', student.id)
     .eq('role', 'student')
 
-  if (error) redirect(`/dashboard?adminMessage=${encodeURIComponent(error.message)}`)
-  redirect(`/dashboard?adminMessage=Masa%20aktif%20diperbarui%20sampai%20${encodeURIComponent(activeUntil)}`)
+  if (error) redirectAdminView('students', error.message)
+  redirectAdminView('students', `Masa aktif diperbarui sampai ${activeUntil}`)
 }
 
 export async function rescheduleStudentSession(formData: FormData) {

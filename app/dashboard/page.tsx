@@ -5,7 +5,7 @@ import { headers } from 'next/headers'
 import { activateStudent, createPrivatePackage, createRegistrationLink, createStudentAccount, rescheduleStudentSession, signOut } from './actions'
 
 type DashboardPageProps = {
-  searchParams: Promise<{ adminMessage?: string; newStudentId?: string; scheduleLinked?: string; scheduleMessage?: string; month?: string }>
+  searchParams: Promise<{ adminMessage?: string; newStudentId?: string; scheduleLinked?: string; scheduleMessage?: string; month?: string; view?: string }>
 }
 
 function formatLearningDate(date: string) {
@@ -53,6 +53,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
   if (profile?.role === 'admin') {
     const query = await searchParams
+    const dashboardView = ['overview', 'students', 'packages', 'links'].includes(query.view ?? '') ? query.view! : 'overview'
+    const navigation = [
+      { id: 'overview', label: 'Ringkasan', icon: '⌂' },
+      { id: 'students', label: 'Registrasi siswa', icon: '♙' },
+      { id: 'packages', label: 'Buat paket privat', icon: '▤' },
+      { id: 'links', label: 'Tautan pendaftaran', icon: '↗' },
+    ]
     const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
     const requestedMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.month ?? '') ? query.month! : today.slice(0, 7)
     const [calendarYear, calendarMonth] = requestedMonth.split('-').map(Number)
@@ -96,28 +103,43 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     return (
       <div className="min-h-screen bg-slate-50">
         <nav className="border-b border-gray-200 bg-white">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6">
+          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
             <div>
               <p className="text-sm font-bold text-orange-600">Bimbel Cerna</p>
-              <p className="text-lg font-bold text-gray-900">Panel Admin</p>
+              <p className="text-base font-bold text-gray-900 sm:text-lg">Panel Admin</p>
             </div>
-            <form action={signOut}>
-              <button className="text-sm font-semibold text-gray-600 hover:text-red-600">Keluar</button>
-            </form>
+            <div className="flex items-center gap-6">
+              <div className="hidden items-center gap-1 md:flex">
+                {navigation.map((item) => <Link key={item.id} href={`/dashboard?view=${item.id}`} className={`px-3 py-2 text-sm font-semibold ${dashboardView === item.id ? 'text-orange-700' : 'text-gray-600 hover:text-gray-900'}`}>{item.label}</Link>)}
+              </div>
+              <form action={signOut}>
+                <button className="text-sm font-semibold text-gray-600 hover:text-red-600">Keluar</button>
+              </form>
+            </div>
           </div>
         </nav>
 
-        <main className="mx-auto max-w-7xl space-y-10 px-4 py-8 sm:px-6">
-          <header>
+        <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 pb-24 sm:space-y-8 sm:px-6 sm:py-8 md:pb-8">
+          <header className="border-b border-gray-200 pb-4 sm:border-0 sm:pb-0">
             <p className="text-sm font-semibold text-gray-500">Halo, {profile.full_name || user.email}</p>
-            <h1 className="mt-1 text-2xl font-bold text-gray-900">Kelola pendaftaran privat</h1>
+            <h1 className="mt-1 text-xl font-bold text-gray-900 sm:text-2xl">{{ overview: 'Ringkasan dashboard', students: 'Registrasi siswa', packages: 'Buat paket privat', links: 'Tautan pendaftaran' }[dashboardView]}</h1>
           </header>
 
           {query.adminMessage && <p role="status" className="border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{query.adminMessage}</p>}
           {query.newStudentId && <p role="status" className="border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">ID siswa baru: <strong>{query.newStudentId}</strong></p>}
           {query.scheduleLinked && <p role="status" className="border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">Jadwal dari pendaftaran publik sudah terhubung ke akun siswa.</p>}
 
-          <section aria-labelledby="renewal-reminders" className="border border-orange-200 bg-orange-50 px-5 py-4">
+          {dashboardView === 'overview' && <>
+          <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4" aria-label="Ringkasan">
+            {[
+              { label: 'Akun siswa', value: students?.length ?? 0 },
+              { label: 'Pendaftar masuk', value: registrations?.length ?? 0 },
+              { label: 'Paket privat', value: packages?.length ?? 0 },
+              { label: 'Tautan aktif', value: links?.filter((link) => link.is_active).length ?? 0 },
+            ].map((item) => <article key={item.label} className="border border-gray-200 bg-white p-4 sm:p-5"><p className="text-xs font-semibold text-gray-500 sm:text-sm">{item.label}</p><p className="mt-2 text-2xl font-bold text-gray-900 sm:text-3xl">{item.value}</p></article>)}
+          </section>
+
+          <section aria-labelledby="renewal-reminders" className="border border-orange-200 bg-orange-50 px-4 py-4 sm:px-5">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 id="renewal-reminders" className="font-bold text-gray-900">Pengingat perpanjangan</h2>
               <span className="text-sm font-semibold text-orange-800">{renewalReminders.length} siswa perlu ditindaklanjuti</span>
@@ -148,44 +170,50 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <h2 className="text-lg font-bold text-gray-900">Kalender belajar</h2>
                 <p className="mt-1 text-sm text-gray-600">Jadwal privat seluruh siswa, waktu Palembang.</p>
               </div>
-              <div className="flex items-center gap-3">
-                <Link href={`/dashboard?month=${previousMonth}`} className="border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Bulan sebelumnya</Link>
-                <span className="min-w-32 text-center font-bold capitalize text-gray-900">{monthTitle}</span>
-                <Link href={`/dashboard?month=${nextMonth}`} className="border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">Bulan berikutnya</Link>
+              <div className="flex items-center gap-2">
+                <Link aria-label="Bulan sebelumnya" href={`/dashboard?view=overview&month=${previousMonth}`} className="grid size-9 place-items-center border border-gray-300 text-lg font-semibold text-gray-700 hover:bg-gray-50">‹</Link>
+                <span className="min-w-28 text-center text-sm font-bold capitalize text-gray-900 sm:min-w-32 sm:text-base">{monthTitle}</span>
+                <Link aria-label="Bulan berikutnya" href={`/dashboard?view=overview&month=${nextMonth}`} className="grid size-9 place-items-center border border-gray-300 text-lg font-semibold text-gray-700 hover:bg-gray-50">›</Link>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <div className="grid min-w-[980px] grid-cols-7">
-                {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((day) => <div key={day} className="border-b border-r border-gray-200 bg-gray-50 px-3 py-2 text-xs font-bold uppercase text-gray-500">{day}</div>)}
+            <div className="grid grid-cols-7">
+                {['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((day) => <div key={day} className="border-b border-r border-gray-200 bg-gray-50 py-2 text-center text-[10px] font-bold uppercase text-gray-500 sm:px-3 sm:text-xs">{day}</div>)}
                 {calendarDays.map((day, index) => {
                   const dateKey = day ? `${requestedMonth}-${String(day).padStart(2, '0')}` : ''
                   const daySchedules = dateKey ? schedulesByDate.get(dateKey) ?? [] : []
                   return (
-                    <div key={`${dateKey || 'empty'}-${index}`} className={`min-h-36 border-b border-r border-gray-200 p-2 ${day ? 'bg-white' : 'bg-gray-50'}`}>
+                    <div key={`${dateKey || 'empty'}-${index}`} className={`min-h-12 border-b border-r border-gray-200 p-1 sm:min-h-28 sm:p-2 ${day ? 'bg-white' : 'bg-gray-50'}`}>
                       {day && <>
-                        <p className="mb-2 text-sm font-bold text-gray-700">{day}</p>
-                        <div className="space-y-2">
-                          {daySchedules.map((schedule) => {
+                        <p className="mb-1 text-[11px] font-bold text-gray-700 sm:mb-2 sm:text-sm">{day}</p>
+                        <div className="space-y-1 sm:space-y-2">
+                          {daySchedules.slice(0, 1).map((schedule) => {
+                            const registration = registrationsById.get(schedule.registration_id)
+                            const startTime = new Date(schedule.starts_at).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+                            return (
+                              <article key={schedule.id} className="border-l-2 border-orange-500 bg-orange-50 px-1 py-0.5 text-[9px] leading-tight sm:p-2 sm:text-xs">
+                                <p className="font-bold text-gray-900">{startTime}</p>
+                                <p className="hidden truncate font-semibold text-gray-800 sm:block">{registration?.student_name ?? 'Siswa'}</p>
+                                <p className="hidden break-words text-gray-600 sm:block">{schedule.location}</p>
+                              </article>
+                            )
+                          })}
+                          {daySchedules.length > 1 && <p className="text-[9px] font-semibold text-orange-800 sm:hidden">+{daySchedules.length - 1}</p>}
+                          {daySchedules.slice(1).map((schedule) => {
                             const registration = registrationsById.get(schedule.registration_id)
                             const startTime = new Date(schedule.starts_at).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
                             const endTime = new Date(schedule.ends_at).toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-                            return (
-                              <article key={schedule.id} className="border-l-2 border-orange-500 bg-orange-50 p-2 text-xs">
-                                <p className="font-bold text-gray-900">{startTime}–{endTime}</p>
-                                <p className="mt-0.5 font-semibold text-gray-800">{registration?.student_name ?? 'Siswa'}</p>
-                                <p className="mt-0.5 break-words text-gray-600">{schedule.location}</p>
-                              </article>
-                            )
+                            return <article key={schedule.id} className="hidden border-l-2 border-orange-500 bg-orange-50 p-2 text-xs sm:block"><p className="font-bold text-gray-900">{startTime}–{endTime}</p><p className="mt-0.5 font-semibold text-gray-800">{registration?.student_name ?? 'Siswa'}</p><p className="mt-0.5 break-words text-gray-600">{schedule.location}</p></article>
                           })}
                         </div>
                       </>}
                     </div>
                   )
                 })}
-              </div>
             </div>
           </section>
+          </>}
 
+          {dashboardView === 'students' && <>
           <section className="border border-gray-200 bg-white p-6">
             <h2 className="text-lg font-bold text-gray-900">Registrasi akun siswa</h2>
             <p className="mt-1 text-sm text-gray-600">Buat akun login untuk siswa. Sistem membuat ID siswa unik secara otomatis.</p>
@@ -264,9 +292,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               </div>
             ) : <p className="px-6 py-10 text-center text-sm text-gray-500">Belum ada akun siswa.</p>}
           </section>
+          </>}
 
-          <section className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr]">
-            <div className="border border-gray-200 bg-white p-6">
+          {dashboardView === 'packages' && <section className="max-w-2xl border border-gray-200 bg-white p-5 sm:p-6">
               <h2 className="text-lg font-bold text-gray-900">Buat paket privat</h2>
               <p className="mt-1 text-sm text-gray-600">Paket akan tersedia untuk dipilih saat membuat tautan pendaftaran.</p>
               <form action={createPrivatePackage} className="mt-5 space-y-4">
@@ -289,9 +317,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 </label>
                 <button className="w-full bg-gray-900 px-4 py-3 font-semibold text-white hover:bg-gray-700">Simpan paket</button>
               </form>
-            </div>
+          </section>}
 
-            <div className="border border-gray-200 bg-white p-6">
+          {dashboardView === 'links' && <section className="border border-gray-200 bg-white p-5 sm:p-6">
               <h2 className="text-lg font-bold text-gray-900">Buat tautan pendaftaran</h2>
               <p className="mt-1 text-sm text-gray-600">Setiap tautan terhubung ke satu paket dan bisa dibagikan ke calon siswa.</p>
               <form action={createRegistrationLink} className="mt-5 flex flex-col gap-3 sm:flex-row">
@@ -321,9 +349,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                   </ul>
                 ) : <p className="mt-3 text-sm text-gray-500">Belum ada tautan. Buat tautan setelah menambahkan paket.</p>}
               </div>
-            </div>
           </section>
+          }
 
+          {dashboardView === 'students' &&
           <section className="border border-gray-200 bg-white">
             <div className="border-b border-gray-200 px-6 py-5">
               <h2 className="text-lg font-bold text-gray-900">Pendaftar masuk</h2>
@@ -350,7 +379,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               </div>
             ) : <p className="px-6 py-10 text-center text-sm text-gray-500">Belum ada pendaftaran yang masuk.</p>}
           </section>
+          }
         </main>
+        <nav aria-label="Menu admin" className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(15,23,42,0.08)] md:hidden">
+          {navigation.map((item) => <Link key={item.id} href={`/dashboard?view=${item.id}`} aria-current={dashboardView === item.id ? 'page' : undefined} className={`flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-center ${dashboardView === item.id ? 'text-orange-700' : 'text-gray-500'}`}><span aria-hidden="true" className="text-lg leading-none">{item.icon}</span><span className="text-[10px] font-semibold leading-tight">{item.label}</span></Link>)}
+        </nav>
       </div>
     )
   }
