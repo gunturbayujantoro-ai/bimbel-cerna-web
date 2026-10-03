@@ -166,6 +166,7 @@ create policy "Active students reschedule their sessions"
 
 revoke all on public.private_packages, public.registration_links, public.public_registrations from anon, authenticated;
 grant select, insert, update on public.private_packages, public.registration_links to authenticated;
+grant delete on public.registration_links to authenticated;
 grant select on public.public_registrations to authenticated;
 revoke all on public.student_schedules from anon, authenticated;
 grant select, update on public.student_schedules to authenticated;
@@ -347,7 +348,59 @@ alter table public.profiles
   add column if not exists email text,
   add column if not exists active_from date,
   add column if not exists active_until date,
-  add column if not exists is_active boolean not null default false;
+  add column if not exists is_active boolean not null default false,
+  add column if not exists tentor_id uuid,
+  add column if not exists teaching_subjects text[] not null default '{}';
+
+do $$
+declare
+  role_constraint record;
+  replaced_role_check boolean := false;
+begin
+  for role_constraint in
+    select c.conname, pg_get_constraintdef(c.oid) as definition
+    from pg_constraint as c
+    where c.conrelid = 'public.profiles'::regclass
+      and c.contype = 'c'
+      and pg_get_constraintdef(c.oid) ilike '%role%'
+      and pg_get_constraintdef(c.oid) ilike '%admin%'
+      and pg_get_constraintdef(c.oid) ilike '%student%'
+      and pg_get_constraintdef(c.oid) not ilike '%tentor%'
+  loop
+    execute format('alter table public.profiles drop constraint %I', role_constraint.conname);
+    replaced_role_check := true;
+  end loop;
+
+  if replaced_role_check then
+    alter table public.profiles
+      add constraint profiles_role_check check (role in ('admin', 'student', 'tentor'));
+  end if;
+end;
+$$;
+
+alter table public.profiles
+  drop constraint if exists profiles_tentor_id_fkey;
+
+alter table public.profiles
+  add constraint profiles_tentor_id_fkey
+  foreign key (tentor_id) references public.profiles(id) on delete set null;
+
+create index if not exists profiles_tentor_id_idx
+  on public.profiles(tentor_id)
+  where tentor_id is not null;
+
+drop policy if exists "Tentors read assigned student schedules" on public.student_schedules;
+create policy "Tentors read assigned student schedules"
+  on public.student_schedules for select to authenticated
+  using (
+    exists (
+      select 1
+      from public.profiles as student
+      where student.id = student_schedules.student_profile_id
+        and student.role = 'student'
+        and student.tentor_id = (select auth.uid())
+    )
+  );
 
 create sequence if not exists public.student_id_seq;
 
@@ -405,6 +458,11 @@ create policy "Admins read student profiles"
   on public.profiles for select to authenticated
   using (public.is_bimbel_admin());
 
+drop policy if exists "Tentors read assigned student profiles" on public.profiles;
+create policy "Tentors read assigned student profiles"
+  on public.profiles for select to authenticated
+  using (role = 'student' and tentor_id = (select auth.uid()));
+
 drop policy if exists "Admins update student profiles" on public.profiles;
 create policy "Admins update student profiles"
   on public.profiles for update to authenticated
@@ -428,7 +486,9 @@ begin
     or new.student_id is distinct from old.student_id
     or new.is_active is distinct from old.is_active
     or new.active_from is distinct from old.active_from
-    or new.active_until is distinct from old.active_until then
+    or new.active_until is distinct from old.active_until
+    or new.tentor_id is distinct from old.tentor_id
+    or new.teaching_subjects is distinct from old.teaching_subjects then
     if old.role = 'student'
       and auth.uid() = old.id
       and old.is_active
@@ -450,7 +510,7 @@ revoke all on function public.guard_profile_admin_fields() from public, anon, au
 
 drop trigger if exists profiles_guard_admin_fields on public.profiles;
 create trigger profiles_guard_admin_fields
-  before update of role, student_id, is_active, active_from, active_until on public.profiles
+  before update of role, student_id, is_active, active_from, active_until, tentor_id, teaching_subjects on public.profiles
   for each row execute function public.guard_profile_admin_fields();
 
 create or replace function public.refresh_student_access()

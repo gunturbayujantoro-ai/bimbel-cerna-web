@@ -4,7 +4,7 @@ import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { redirect } from 'next/navigation'
 
-function redirectAdminView(view: 'students' | 'packages' | 'links', message: string): never {
+function redirectAdminView(view: 'students' | 'packages' | 'links' | 'tentors', message: string): never {
   redirect(`/dashboard?view=${view}&adminMessage=${encodeURIComponent(message)}`)
 }
 
@@ -114,6 +114,95 @@ export async function deleteRegistrationLink(formData: FormData) {
   }
 
   redirectAdminView('links', 'Tautan pendaftaran berhasil dihapus')
+}
+
+export async function createTutorAccount(formData: FormData) {
+  await requireAdmin()
+  const fullName = String(formData.get('fullName') ?? '').trim()
+  const email = String(formData.get('email') ?? '').trim().toLowerCase()
+  const password = String(formData.get('password') ?? '')
+  const subjects = String(formData.get('subjects') ?? '')
+    .split(/[,\n]/)
+    .map((subject) => subject.trim())
+    .filter(Boolean)
+
+  if (!fullName || fullName.length > 150 || !/^\S+@\S+\.\S+$/.test(email) || email.length > 254 || password.length < 8 || !subjects.length || subjects.some((subject) => subject.length > 100)) {
+    redirectAdminView('tentors', 'Data tentor tidak valid. Password minimal 8 karakter dan mata pelajaran wajib diisi.')
+  }
+
+  let adminClient
+  try {
+    adminClient = createAdminClient()
+  } catch {
+    redirectAdminView('tentors', 'SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi')
+  }
+
+  const { data, error } = await adminClient.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: fullName },
+  })
+
+  if (error || !data.user) {
+    redirectAdminView('tentors', error?.message ?? 'Akun tentor gagal dibuat')
+  }
+
+  const { error: profileError } = await adminClient.from('profiles').upsert({
+    id: data.user.id,
+    full_name: fullName,
+    email,
+    school: '',
+    role: 'tentor',
+    student_id: null,
+    is_active: false,
+    active_from: null,
+    active_until: null,
+    tentor_id: null,
+    teaching_subjects: [...new Set(subjects)],
+  }, { onConflict: 'id' })
+
+  if (profileError) {
+    await adminClient.auth.admin.deleteUser(data.user.id)
+    redirectAdminView('tentors', 'Profil tentor gagal dibuat. Pastikan skrip SQL pendaftaran terbaru sudah dijalankan.')
+  }
+
+  redirectAdminView('tentors', 'Akun tentor berhasil dibuat')
+}
+
+export async function assignStudentTutor(formData: FormData) {
+  const { supabase } = await requireAdmin()
+  const studentId = String(formData.get('studentId') ?? '')
+  const tutorId = String(formData.get('tutorId') ?? '')
+
+  if (!/^[0-9a-f-]{36}$/i.test(studentId) || (tutorId && !/^[0-9a-f-]{36}$/i.test(tutorId))) {
+    redirectAdminView('tentors', 'Data penugasan siswa tidak valid')
+  }
+
+  if (tutorId) {
+    const { data: tutor, error: tutorError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', tutorId)
+      .eq('role', 'tentor')
+      .single()
+
+    if (tutorError || !tutor) redirectAdminView('tentors', 'Akun tentor tidak ditemukan')
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ tentor_id: tutorId || null })
+    .eq('id', studentId)
+    .eq('role', 'student')
+    .select('id')
+    .single()
+
+  if (error || !data) {
+    redirectAdminView('tentors', error?.message ?? 'Siswa tidak ditemukan')
+  }
+
+  redirectAdminView('tentors', tutorId ? 'Siswa berhasil dimasukkan ke bucket tentor' : 'Penugasan tentor siswa berhasil dihapus')
 }
 
 export async function createStudentAccount(formData: FormData) {

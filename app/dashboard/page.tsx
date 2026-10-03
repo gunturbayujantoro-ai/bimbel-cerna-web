@@ -2,11 +2,14 @@ import Link from 'next/link'
 import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
-import { activateStudent, createPrivatePackage, createRegistrationLink, createStudentAccount, rescheduleStudentSession, signOut } from './actions'
+import { activateStudent, assignStudentTutor, createPrivatePackage, createRegistrationLink, createStudentAccount, createTutorAccount, rescheduleStudentSession, signOut } from './actions'
 import { DeleteRegistrationLinkButton } from './delete-registration-link-button'
+import { TutorCalendar } from './tutor-calendar'
+import { createJobOpening } from './job-actions'
+import { CloseJobButton } from './close-job-button'
 
 type DashboardPageProps = {
-  searchParams: Promise<{ adminMessage?: string; newStudentId?: string; scheduleLinked?: string; scheduleMessage?: string; month?: string; view?: string }>
+  searchParams: Promise<{ adminMessage?: string; newStudentId?: string; scheduleLinked?: string; scheduleMessage?: string; month?: string; view?: string; jobId?: string }>
 }
 
 function formatLearningDate(date: string) {
@@ -52,14 +55,85 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     }
   }
 
+  if (profile?.role === 'tentor') {
+    const query = await searchParams
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
+    const requestedMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.month ?? '') ? query.month! : today.slice(0, 7)
+    const [calendarYear, calendarMonth] = requestedMonth.split('-').map(Number)
+    const monthStart = new Date(Date.UTC(calendarYear, calendarMonth - 1, 1) - 7 * 60 * 60 * 1000).toISOString()
+    const monthEnd = new Date(Date.UTC(calendarYear, calendarMonth, 1) - 7 * 60 * 60 * 1000).toISOString()
+    const { data: students, error: studentsError } = await supabase
+      .from('profiles')
+      .select('id, full_name, student_id, school')
+      .eq('role', 'student')
+      .eq('tentor_id', user.id)
+      .order('full_name')
+
+    if (studentsError) throw new Error(`Data siswa tentor gagal dimuat: ${studentsError.message}`)
+
+    let schedules: Array<{ id: string; student_profile_id: string | null; starts_at: string; ends_at: string; location: string }> = []
+    if (students?.length) {
+      const { data, error } = await supabase
+        .from('student_schedules')
+        .select('id, student_profile_id, starts_at, ends_at, location')
+        .in('student_profile_id', students.map((student) => student.id))
+        .eq('status', 'scheduled')
+        .gte('starts_at', monthStart)
+        .lt('starts_at', monthEnd)
+        .order('starts_at')
+
+      if (error) throw new Error(`Kalender tentor gagal dimuat: ${error.message}`)
+      schedules = data ?? []
+    }
+
+    const subjects: string[] = Array.isArray(profile.teaching_subjects) ? profile.teaching_subjects : []
+
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <nav className="border-b border-gray-200 bg-white">
+          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+            <div>
+              <p className="text-sm font-bold text-orange-600">Bimbel Cerna</p>
+              <p className="text-base font-bold text-gray-900 sm:text-lg">Panel Tentor</p>
+            </div>
+            <form action={signOut}>
+              <button className="text-sm font-semibold text-gray-600 hover:text-red-600">Keluar</button>
+            </form>
+          </div>
+        </nav>
+        <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 sm:py-8">
+          <header>
+            <p className="text-sm font-semibold text-gray-500">Halo, {profile.full_name || user.email}</p>
+            <h1 className="mt-1 text-2xl font-bold text-gray-900">Dashboard Tentor</h1>
+          </header>
+          <section className="border border-blue-200 bg-blue-50 p-5">
+            <h2 className="font-bold text-gray-900">Mata pelajaran yang diajarkan</h2>
+            {subjects.length ? (
+              <ul className="mt-3 flex flex-wrap gap-2">
+                {subjects.map((subject) => <li key={subject} className="bg-white px-3 py-1.5 text-sm font-semibold text-blue-800">{subject}</li>)}
+              </ul>
+            ) : <p className="mt-2 text-sm text-gray-600">Belum ada mata pelajaran yang ditetapkan admin.</p>}
+          </section>
+          <TutorCalendar month={requestedMonth} students={students ?? []} schedules={schedules} />
+        </main>
+      </div>
+    )
+  }
+
+  if (profile?.role !== 'admin' && profile?.role !== 'student') {
+    redirect('/login?message=Akun%20belum%20memiliki%20role%20yang%20valid')
+  }
+
   if (profile?.role === 'admin') {
     const query = await searchParams
-    const dashboardView = ['overview', 'students', 'packages', 'links'].includes(query.view ?? '') ? query.view! : 'overview'
+    const dashboardView = ['overview', 'students', 'packages', 'links', 'tentors', 'lowongan'].includes(query.view ?? '') ? query.view! : 'overview'
     const navigation = [
       { id: 'overview', label: 'Ringkasan', icon: '⌂' },
       { id: 'students', label: 'Registrasi siswa', icon: '♙' },
       { id: 'packages', label: 'Buat paket privat', icon: '▤' },
       { id: 'links', label: 'Tautan pendaftaran', icon: '↗' },
+      { id: 'tentors', label: 'Tentor', icon: '♧' },
+      { id: 'lowongan', label: 'Lowongan kerja', icon: '▣' },
     ]
     const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' })
     const requestedMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(query.month ?? '') ? query.month! : today.slice(0, 7)
@@ -77,14 +151,24 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     calendarDays.push(...Array.from({ length: daysInMonth }, (_, index) => index + 1))
     while (calendarDays.length % 7 !== 0) calendarDays.push(null)
 
-    const [{ data: students }, { data: packages }, { data: links }, { data: registrations }, { data: schedules }, requestHeaders] = await Promise.all([
-      supabase.from('profiles').select('id, student_id, full_name, email, school, is_active, active_from, active_until').eq('role', 'student').order('full_name'),
+    const [{ data: students }, { data: tentors }, { data: packages }, { data: links }, { data: registrations }, { data: schedules }, { data: jobOpenings, error: jobOpeningsError }, { data: jobApplicants, error: jobApplicantsError }, requestHeaders] = await Promise.all([
+      supabase.from('profiles').select('id, student_id, full_name, email, school, is_active, active_from, active_until, tentor_id').eq('role', 'student').order('full_name'),
+      supabase.from('profiles').select('id, full_name, email, teaching_subjects').eq('role', 'tentor').order('full_name'),
       supabase.from('private_packages').select('*').order('created_at', { ascending: false }),
       supabase.from('registration_links').select('*').order('created_at', { ascending: false }),
       supabase.from('public_registrations').select('*').order('created_at', { ascending: false }),
       supabase.from('student_schedules').select('*').eq('status', 'scheduled').gte('starts_at', monthStart).lt('starts_at', monthEnd).order('starts_at'),
+      dashboardView === 'lowongan'
+        ? supabase.from('job_openings').select('id, token, title, department, employment_type, work_arrangement, location, salary_min, salary_max, description, responsibilities, requirements, benefits, application_deadline, contact_email, contact_phone, status, created_by, created_at, closed_at').order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+      dashboardView === 'lowongan'
+        ? supabase.from('job_applicants').select('id, job_opening_id, full_name, email, phone, birth_date, gender, address, education_level, education_institution, education_major, graduation_year, experience_years, experience_summary, skills, portfolio_url, social_platform, social_url, cover_letter, created_at').order('created_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
       headers(),
     ])
+    if (jobOpeningsError || jobApplicantsError) {
+      throw new Error(`Data lowongan kerja gagal dimuat: ${jobOpeningsError?.message ?? jobApplicantsError?.message}`)
+    }
     const registrationsById = new Map((registrations ?? []).map((registration) => [registration.id, registration]))
     const schedulesByDate = new Map<string, typeof schedules>()
     for (const schedule of schedules ?? []) {
@@ -123,7 +207,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 pb-24 sm:space-y-8 sm:px-6 sm:py-8 md:pb-8">
           <header className="border-b border-gray-200 pb-4 sm:border-0 sm:pb-0">
             <p className="text-sm font-semibold text-gray-500">Halo, {profile.full_name || user.email}</p>
-            <h1 className="mt-1 text-xl font-bold text-gray-900 sm:text-2xl">{{ overview: 'Ringkasan dashboard', students: 'Registrasi siswa', packages: 'Buat paket privat', links: 'Tautan pendaftaran' }[dashboardView]}</h1>
+            <h1 className="mt-1 text-xl font-bold text-gray-900 sm:text-2xl">{{ overview: 'Ringkasan dashboard', students: 'Registrasi siswa', packages: 'Buat paket privat', links: 'Tautan pendaftaran', tentors: 'Kelola tentor', lowongan: 'Lowongan kerja' }[dashboardView]}</h1>
           </header>
 
           {query.adminMessage && <p role="status" className="border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">{query.adminMessage}</p>}
@@ -295,6 +379,203 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </section>
           </>}
 
+          {dashboardView === 'tentors' && <>
+            <section className="max-w-3xl border border-gray-200 bg-white p-5 sm:p-6">
+              <h2 className="text-lg font-bold text-gray-900">Buat akun tentor</h2>
+              <p className="mt-1 text-sm text-gray-600">Admin menentukan mata pelajaran tentor. Pisahkan beberapa mata pelajaran dengan koma atau baris baru.</p>
+              <form action={createTutorAccount} className="mt-5 grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-semibold text-gray-700">Nama lengkap
+                  <input name="fullName" required maxLength={150} autoComplete="name" className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal outline-none focus:border-orange-500" />
+                </label>
+                <label className="text-sm font-semibold text-gray-700">Email login
+                  <input name="email" type="email" required maxLength={254} autoComplete="email" className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal outline-none focus:border-orange-500" />
+                </label>
+                <label className="text-sm font-semibold text-gray-700">Password awal
+                  <input name="password" type="password" required minLength={8} autoComplete="new-password" className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal outline-none focus:border-orange-500" />
+                </label>
+                <label className="text-sm font-semibold text-gray-700">Mata pelajaran
+                  <textarea name="subjects" required maxLength={1000} rows={2} placeholder="Matematika, Fisika" className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal outline-none focus:border-orange-500" />
+                </label>
+                <button className="bg-gray-900 px-5 py-3 font-semibold text-white hover:bg-gray-700 sm:col-span-2">Buat akun tentor</button>
+              </form>
+            </section>
+
+            <section className="border border-gray-200 bg-white">
+              <div className="border-b border-gray-200 px-5 py-4">
+                <h2 className="text-lg font-bold text-gray-900">Bucket tentor dan penugasan siswa</h2>
+                <p className="mt-1 text-sm text-gray-600">Setiap siswa hanya dapat ditugaskan kepada satu tentor.</p>
+              </div>
+              {tentors?.length ? (
+                <ul className="divide-y divide-gray-100">
+                  {tentors.map((tentor) => (
+                    <li key={tentor.id} className="px-5 py-4">
+                      <p className="font-semibold text-gray-900">{tentor.full_name}</p>
+                      <p className="mt-1 text-sm text-gray-600">{tentor.email}</p>
+                      <p className="mt-1 text-sm text-blue-800">Mata pelajaran: {Array.isArray(tentor.teaching_subjects) && tentor.teaching_subjects.length ? tentor.teaching_subjects.join(', ') : 'Belum ditentukan'}</p>
+                      <p className="mt-1 text-sm text-gray-600">Siswa dalam bucket: {(students ?? []).filter((student) => student.tentor_id === tentor.id).length}</p>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="px-5 py-8 text-center text-sm text-gray-500">Belum ada akun tentor.</p>}
+
+              <div className="border-t border-gray-200 px-5 py-4">
+                <h3 className="font-bold text-gray-900">Masukkan siswa ke bucket</h3>
+                {students?.length ? (
+                  <ul className="mt-3 divide-y divide-gray-100">
+                    {students.map((student) => (
+                      <li key={student.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="font-semibold text-gray-900">{student.full_name}</p>
+                          <p className="text-sm text-gray-600">{student.student_id ?? 'ID siswa belum tersedia'} · {student.school ?? 'Sekolah belum diisi'}</p>
+                        </div>
+                        <form action={assignStudentTutor} className="flex flex-wrap items-center gap-2">
+                          <input type="hidden" name="studentId" value={student.id} />
+                          <select name="tutorId" defaultValue={student.tentor_id ?? ''} aria-label={`Pilih tentor untuk ${student.full_name}`} className="min-w-52 border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-orange-500">
+                            <option value="">Belum ditugaskan</option>
+                            {(tentors ?? []).map((tentor) => <option key={tentor.id} value={tentor.id}>{tentor.full_name}</option>)}
+                          </select>
+                          <button disabled={!tentors?.length} className="bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-gray-300">Simpan</button>
+                        </form>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="mt-3 text-sm text-gray-500">Belum ada akun siswa untuk ditugaskan.</p>}
+              </div>
+            </section>
+          </>}
+
+          {dashboardView === 'lowongan' && <>
+            <section className="border border-gray-200 bg-white p-5 sm:p-6">
+              <h2 className="text-lg font-bold text-gray-900">Buat lowongan kerja</h2>
+              <p className="mt-1 text-sm text-gray-600">Isi informasi posisi, kualifikasi, kompensasi, kontak, dan batas waktu pendaftaran.</p>
+              <form action={createJobOpening} className="mt-5 grid gap-4 sm:grid-cols-2">
+                <label className="text-sm font-semibold text-gray-800 sm:col-span-2">Judul posisi *
+                  <input name="title" required maxLength={150} className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" placeholder="Tentor Matematika" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800">Departemen / bidang *
+                  <input name="department" required maxLength={120} className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" placeholder="Pengajaran" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800">Tipe pekerjaan *
+                  <select name="employmentType" required defaultValue="" className="mt-1 w-full border border-gray-300 bg-white px-3 py-2.5 font-normal text-black">
+                    <option value="" disabled>Pilih tipe pekerjaan</option>
+                    {['Full-time', 'Part-time', 'Kontrak', 'Freelance', 'Magang'].map((type) => <option key={type}>{type}</option>)}
+                  </select>
+                </label>
+                <label className="text-sm font-semibold text-gray-800">Lokasi kerja *
+                  <input name="location" required maxLength={180} className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" placeholder="Palembang" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800">Pengaturan kerja *
+                  <select name="workArrangement" required defaultValue="" className="mt-1 w-full border border-gray-300 bg-white px-3 py-2.5 font-normal text-black">
+                    <option value="" disabled>Pilih pengaturan kerja</option><option>WFO</option><option>WFH</option><option>Hybrid</option>
+                  </select>
+                </label>
+                <label className="text-sm font-semibold text-gray-800">Gaji minimum per bulan (opsional)
+                  <input name="salaryMin" type="number" min="0" step="1000" className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800">Gaji maksimum per bulan (opsional)
+                  <input name="salaryMax" type="number" min="0" step="1000" className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800 sm:col-span-2">Deskripsi pekerjaan *
+                  <textarea name="description" required maxLength={10000} rows={4} className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800 sm:col-span-2">Tanggung jawab *
+                  <textarea name="responsibilities" required maxLength={10000} rows={4} className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" placeholder="Satu tanggung jawab per baris" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800 sm:col-span-2">Persyaratan / kualifikasi *
+                  <textarea name="requirements" required maxLength={10000} rows={4} className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" placeholder="Satu persyaratan per baris" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800 sm:col-span-2">Benefit (opsional)
+                  <textarea name="benefits" maxLength={10000} rows={3} className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800">Batas akhir lamaran *
+                  <input name="applicationDeadline" type="date" min={today} required className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800">Email kontak rekrutmen *
+                  <input name="contactEmail" type="email" required maxLength={254} className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" />
+                </label>
+                <label className="text-sm font-semibold text-gray-800">Nomor kontak rekrutmen *
+                  <input name="contactPhone" type="tel" required maxLength={30} className="mt-1 w-full border border-gray-300 px-3 py-2.5 font-normal text-black" />
+                </label>
+                <button className="bg-orange-500 px-5 py-3 font-semibold text-white hover:bg-orange-600 sm:col-span-2">Simpan lowongan dan buat poster QR</button>
+              </form>
+            </section>
+
+            <section className="border border-gray-200 bg-white">
+              <div className="border-b border-gray-200 px-5 py-4">
+                <h2 className="text-lg font-bold text-gray-900">Tabel lowongan kerja</h2>
+                <p className="mt-1 text-sm text-gray-600">Lowongan yang ditutup tidak dapat dibuka atau dilamar lagi.</p>
+              </div>
+              {jobOpenings?.length ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[950px] text-left text-sm">
+                    <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+                      <tr><th className="px-5 py-3">Posisi</th><th className="px-5 py-3">Tipe / lokasi</th><th className="px-5 py-3">Batas lamaran</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Jumlah pelamar</th><th className="px-5 py-3">Aksi</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {jobOpenings.map((job) => {
+                        const applicantCount = (jobApplicants ?? []).filter((applicant) => applicant.job_opening_id === job.id).length
+                        return (
+                          <tr key={job.id} className="align-top">
+                            <td className="px-5 py-4"><p className="font-semibold text-gray-900">{job.title}</p><p className="mt-1 text-gray-600">{job.department}</p></td>
+                            <td className="px-5 py-4">{job.employment_type}<p className="mt-1 text-gray-600">{job.work_arrangement} · {job.location}</p></td>
+                            <td className="px-5 py-4">{formatLearningDate(job.application_deadline)}</td>
+                            <td className="px-5 py-4"><span className={job.status === 'open' && job.application_deadline >= today ? 'font-semibold text-green-700' : 'font-semibold text-gray-500'}>{job.status === 'open' && job.application_deadline >= today ? 'Dibuka' : 'Ditutup'}</span></td>
+                            <td className="px-5 py-4">{applicantCount}</td>
+                            <td className="space-y-2 px-5 py-4">
+                              <Link href={`/dashboard/lowongan/${job.id}/poster`} className="block font-semibold text-blue-700 underline">Poster QR</Link>
+                              <Link href={`/dashboard?view=lowongan&jobId=${job.id}`} className="block font-semibold text-blue-700 underline">Lihat pelamar</Link>
+                              {job.status === 'open' && job.application_deadline >= today && <CloseJobButton jobId={job.id} />}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : <p className="px-5 py-8 text-center text-sm text-gray-500">Belum ada lowongan kerja.</p>}
+            </section>
+
+            {query.jobId && (() => {
+              const selectedJob = jobOpenings?.find((job) => job.id === query.jobId)
+              const selectedApplicants = (jobApplicants ?? []).filter((applicant) => applicant.job_opening_id === query.jobId)
+              if (!selectedJob) return <p role="alert" className="border border-red-200 bg-red-50 p-4 text-sm text-red-700">Lowongan tidak ditemukan.</p>
+              return (
+                <section className="border border-gray-200 bg-white">
+                  <div className="border-b border-gray-200 px-5 py-4">
+                    <h2 className="text-lg font-bold text-gray-900">Pelamar: {selectedJob.title}</h2>
+                    <p className="mt-1 text-sm text-gray-600">{selectedApplicants.length} pelamar</p>
+                  </div>
+                  {selectedApplicants.length ? (
+                    <div className="divide-y divide-gray-100">
+                      {selectedApplicants.map((applicant) => (
+                        <article key={applicant.id} className="grid gap-4 p-5 lg:grid-cols-2">
+                          <div>
+                            <h3 className="font-bold text-gray-900">{applicant.full_name}</h3>
+                            <p className="mt-1 text-sm text-gray-700">{applicant.email} · {applicant.phone}</p>
+                            <p className="mt-1 text-sm text-gray-600">{applicant.gender} · Lahir {formatLearningDate(applicant.birth_date)}</p>
+                            <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">{applicant.address}</p>
+                            <p className="mt-3 text-sm font-semibold text-gray-900">Pendidikan</p>
+                            <p className="text-sm text-gray-700">{applicant.education_level} {applicant.education_major} · {applicant.education_institution} ({applicant.graduation_year})</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold text-gray-900">Pengalaman ({applicant.experience_years} tahun)</p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{applicant.experience_summary}</p>
+                            <p className="mt-3 text-sm font-semibold text-gray-900">Keahlian</p>
+                            <p className="mt-1 text-sm text-gray-700">{applicant.skills.join(', ')}</p>
+                            <a href={applicant.social_url} target="_blank" rel="noreferrer" className="mt-3 block break-all text-sm font-semibold text-blue-700 underline">{applicant.social_platform}: {applicant.social_url}</a>
+                            {applicant.portfolio_url && <a href={applicant.portfolio_url} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm text-blue-700 underline">Portofolio: {applicant.portfolio_url}</a>}
+                            <p className="mt-3 text-sm font-semibold text-gray-900">Surat lamaran / motivasi</p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{applicant.cover_letter}</p>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : <p className="px-5 py-8 text-center text-sm text-gray-500">Belum ada pelamar untuk lowongan ini.</p>}
+                </section>
+              )
+            })()}
+          </>}
+
           {dashboardView === 'packages' && <section className="max-w-2xl border border-gray-200 bg-white p-5 sm:p-6">
               <h2 className="text-lg font-bold text-gray-900">Buat paket privat</h2>
               <p className="mt-1 text-sm text-gray-600">Paket akan tersedia untuk dipilih saat membuat tautan pendaftaran.</p>
@@ -385,7 +666,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           </section>
           }
         </main>
-        <nav aria-label="Menu admin" className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-4 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(15,23,42,0.08)] md:hidden">
+        <nav aria-label="Menu admin" className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-6 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(15,23,42,0.08)] md:hidden">
           {navigation.map((item) => <Link key={item.id} href={`/dashboard?view=${item.id}`} aria-current={dashboardView === item.id ? 'page' : undefined} className={`flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-center ${dashboardView === item.id ? 'text-orange-700' : 'text-gray-500'}`}><span aria-hidden="true" className="text-lg leading-none">{item.icon}</span><span className="text-[10px] font-semibold leading-tight">{item.label}</span></Link>)}
         </nav>
       </div>
