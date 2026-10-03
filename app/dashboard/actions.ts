@@ -220,8 +220,9 @@ export async function createStudentAccount(formData: FormData) {
   let adminClient
   try {
     adminClient = createAdminClient()
-  } catch {
-    redirectAdminView('students', 'SUPABASE_SERVICE_ROLE_KEY belum dikonfigurasi')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Konfigurasi Supabase admin belum tersedia'
+    redirectAdminView('students', `${message}. Atur pada environment server (misalnya .env.local), lalu restart aplikasi.`)
   }
 
   if (registrationId) {

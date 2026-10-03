@@ -543,31 +543,48 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                 <section className="border border-gray-200 bg-white">
                   <div className="border-b border-gray-200 px-5 py-4">
                     <h2 className="text-lg font-bold text-gray-900">Pelamar: {selectedJob.title}</h2>
-                    <p className="mt-1 text-sm text-gray-600">{selectedApplicants.length} pelamar</p>
+                    <p className="mt-1 inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
+                      <span className="inline-flex size-7 items-center justify-center rounded-full bg-orange-100 text-xs font-bold text-orange-800">{selectedApplicants.length}</span>
+                      {selectedApplicants.length} pelamar
+                    </p>
                   </div>
                   {selectedApplicants.length ? (
                     <div className="divide-y divide-gray-100">
                       {selectedApplicants.map((applicant) => (
-                        <article key={applicant.id} className="grid gap-4 p-5 lg:grid-cols-2">
-                          <div>
-                            <h3 className="font-bold text-gray-900">{applicant.full_name}</h3>
-                            <p className="mt-1 text-sm text-gray-700">{applicant.email} · {applicant.phone}</p>
-                            <p className="mt-1 text-sm text-gray-600">{applicant.gender} · Lahir {formatLearningDate(applicant.birth_date)}</p>
-                            <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">{applicant.address}</p>
-                            <p className="mt-3 text-sm font-semibold text-gray-900">Pendidikan</p>
-                            <p className="text-sm text-gray-700">{applicant.education_level} {applicant.education_major} · {applicant.education_institution} ({applicant.graduation_year})</p>
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">Pengalaman ({applicant.experience_years} tahun)</p>
-                            <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{applicant.experience_summary}</p>
-                            <p className="mt-3 text-sm font-semibold text-gray-900">Keahlian</p>
-                            <p className="mt-1 text-sm text-gray-700">{applicant.skills.join(', ')}</p>
-                            <a href={applicant.social_url} target="_blank" rel="noreferrer" className="mt-3 block break-all text-sm font-semibold text-blue-700 underline">{applicant.social_platform}: {applicant.social_url}</a>
-                            {applicant.portfolio_url && <a href={applicant.portfolio_url} target="_blank" rel="noreferrer" className="mt-2 block break-all text-sm text-blue-700 underline">Portofolio: {applicant.portfolio_url}</a>}
-                            <p className="mt-3 text-sm font-semibold text-gray-900">Surat lamaran / motivasi</p>
-                            <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{applicant.cover_letter}</p>
-                          </div>
-                        </article>
+                        <details key={applicant.id} className="group">
+                          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-5 py-4 transition hover:bg-orange-50 [&::-webkit-details-marker]:hidden">
+                            <span>
+                              <span className="block font-bold text-gray-900">{applicant.full_name}</span>
+                              <span className="mt-1 block text-sm font-medium text-gray-700">{applicant.phone}</span>
+                            </span>
+                            <span className="rounded-full border border-orange-200 px-3 py-1.5 text-sm font-semibold text-orange-800 group-open:bg-orange-100">
+                              <span className="group-open:hidden">Lihat detail pelamar</span>
+                              <span className="hidden group-open:inline">Tutup detail</span>
+                            </span>
+                          </summary>
+                          <article className="grid gap-5 border-t border-gray-100 bg-slate-50 p-5 lg:grid-cols-2">
+                            <div className="space-y-2">
+                              <h3 className="font-bold text-gray-900">Data diri dan kontak</h3>
+                              <p className="text-sm text-gray-800">Email: {applicant.email}</p>
+                              <p className="text-sm text-gray-800">Telepon: {applicant.phone}</p>
+                              <p className="text-sm text-gray-800">{applicant.gender} · Lahir {formatLearningDate(applicant.birth_date)}</p>
+                              <p className="whitespace-pre-wrap text-sm text-gray-800">{applicant.address}</p>
+                              <p className="text-xs text-gray-700">Lamaran diterima: {new Date(applicant.created_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'medium', timeStyle: 'short' })}</p>
+                              <h3 className="pt-2 font-bold text-gray-900">Pendidikan</h3>
+                              <p className="text-sm text-gray-800">{applicant.education_level} {applicant.education_major} · {applicant.education_institution} ({applicant.graduation_year})</p>
+                            </div>
+                            <div className="space-y-2">
+                              <h3 className="font-bold text-gray-900">Pengalaman ({applicant.experience_years} tahun)</h3>
+                              <p className="whitespace-pre-wrap text-sm text-gray-800">{applicant.experience_summary}</p>
+                              <h3 className="pt-2 font-bold text-gray-900">Keahlian</h3>
+                              <p className="text-sm text-gray-800">{applicant.skills.join(', ')}</p>
+                              <a href={applicant.social_url} target="_blank" rel="noreferrer" className="block break-all text-sm font-semibold text-blue-700 underline">{applicant.social_platform}: {applicant.social_url}</a>
+                              {applicant.portfolio_url && <a href={applicant.portfolio_url} target="_blank" rel="noreferrer" className="block break-all text-sm text-blue-700 underline">Portofolio: {applicant.portfolio_url}</a>}
+                              <h3 className="pt-2 font-bold text-gray-900">Surat lamaran / motivasi</h3>
+                              <p className="whitespace-pre-wrap text-sm text-gray-800">{applicant.cover_letter}</p>
+                            </div>
+                          </article>
+                        </details>
                       ))}
                     </div>
                   ) : <p className="px-5 py-8 text-center text-sm text-gray-500">Belum ada pelamar untuk lowongan ini.</p>}
