@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/utils/supabase/server'
 import { submitRegistration } from '../actions'
+import { RegistrationForm, ScheduleFields } from '../registration-form'
 
 type RegistrationPageProps = {
   params: Promise<{ token: string }>
@@ -61,32 +62,9 @@ export default async function RegistrationPage({ params, searchParams }: Registr
 
         {query.error && <p role="alert" className="mb-6 border border-red-200 bg-red-50 p-4 text-sm text-red-700">{query.error}</p>}
 
-        <form action={submitRegistration} className="space-y-8">
+        <RegistrationForm action={submitRegistration}>
           <input type="hidden" name="token" value={token} />
-          <fieldset className="border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
-            <legend className="px-2 text-lg font-bold text-gray-900">Pilih jadwal setiap pertemuan</legend>
-            <p className="mb-5 text-sm text-gray-600">Pilih {packageInfo.sessions} jadwal pada bulan yang sama. Waktu yang sudah dipesan siswa lain akan ditolak.</p>
-            <div className="space-y-4">
-              {Array.from({ length: Number(packageInfo.sessions) }, (_, index) => (
-                <div key={index} className="grid gap-4 border-t border-gray-100 pt-4 sm:grid-cols-[minmax(110px,0.6fr)_1fr_1fr_1fr] sm:items-end">
-                  <p className="font-semibold text-gray-800">Pertemuan {index + 1}</p>
-                  <label>
-                    <span className="mb-1 block text-sm font-semibold text-gray-700">Tanggal *</span>
-                    <input name="scheduleDate" type="date" min={today} required className="w-full border border-gray-300 px-3 py-2.5 outline-none focus:border-orange-500" />
-                  </label>
-                  <label>
-                    <span className="mb-1 block text-sm font-semibold text-gray-700">Mulai *</span>
-                    <input name="scheduleStart" type="time" required className="w-full border border-gray-300 px-3 py-2.5 outline-none focus:border-orange-500" />
-                  </label>
-                  <label>
-                    <span className="mb-1 block text-sm font-semibold text-gray-700">Selesai *</span>
-                    <input name="scheduleEnd" type="time" required className="w-full border border-gray-300 px-3 py-2.5 outline-none focus:border-orange-500" />
-                  </label>
-                </div>
-              ))}
-            </div>
-            <p className="mt-4 text-sm text-gray-500">Lokasi belajar menggunakan alamat siswa yang Anda isi di bawah.</p>
-          </fieldset>
+          <ScheduleFields sessions={Number(packageInfo.sessions)} today={today} />
 
           <fieldset className="border border-gray-200 bg-white p-5 shadow-sm sm:p-7">
             <legend className="px-2 text-lg font-bold text-gray-900">Identitas calon siswa</legend>
@@ -158,8 +136,7 @@ export default async function RegistrationPage({ params, searchParams }: Registr
             </div>
           </fieldset>
 
-          <button type="submit" className="w-full bg-orange-500 px-6 py-3.5 font-bold text-white transition hover:bg-orange-600 sm:w-auto">Kirim pendaftaran</button>
-        </form>
+        </RegistrationForm>
       </div>
     </main>
   )

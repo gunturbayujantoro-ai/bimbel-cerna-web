@@ -3,6 +3,7 @@ import { createClient } from '@/utils/supabase/server'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { activateStudent, createPrivatePackage, createRegistrationLink, createStudentAccount, rescheduleStudentSession, signOut } from './actions'
+import { DeleteRegistrationLinkButton } from './delete-registration-link-button'
 
 type DashboardPageProps = {
   searchParams: Promise<{ adminMessage?: string; newStudentId?: string; scheduleLinked?: string; scheduleMessage?: string; month?: string; view?: string }>
@@ -340,9 +341,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                       const linkedPackage = packageById.get(link.package_id)
                       const url = `${siteUrl}/daftar/${link.token}`
                       return (
-                        <li key={link.id} className="py-3">
-                          <p className="text-sm font-semibold text-gray-800">{linkedPackage?.name ?? 'Paket tidak ditemukan'} <span className={link.is_active ? 'text-green-700' : 'text-gray-500'}>· {link.is_active ? 'Aktif' : 'Nonaktif'}</span></p>
-                          <a href={url} className="mt-1 block break-all text-sm text-blue-700 underline" target="_blank" rel="noreferrer">{url}</a>
+                        <li key={link.id} className="py-3 sm:flex sm:items-start sm:justify-between sm:gap-4">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-800">{linkedPackage?.name ?? 'Paket tidak ditemukan'} <span className={link.is_active ? 'text-green-700' : 'text-gray-500'}>· {link.is_active ? 'Aktif' : 'Nonaktif'}</span></p>
+                            <a href={url} className="mt-1 block break-all text-sm text-blue-700 underline" target="_blank" rel="noreferrer">{url}</a>
+                          </div>
+                          <DeleteRegistrationLinkButton linkId={link.id} />
                         </li>
                       )
                     })}

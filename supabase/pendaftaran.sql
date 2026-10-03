@@ -22,7 +22,7 @@ create table if not exists public.registration_links (
 
 create table if not exists public.public_registrations (
   id uuid primary key default gen_random_uuid(),
-  registration_link_id uuid not null references public.registration_links(id) on delete restrict,
+  registration_link_id uuid references public.registration_links(id) on delete set null,
   package_id uuid not null references public.private_packages(id) on delete restrict,
   student_name text not null check (char_length(trim(student_name)) between 1 and 150),
   gender text not null check (gender in ('Laki-laki', 'Perempuan')),
@@ -39,6 +39,18 @@ create table if not exists public.public_registrations (
   status text not null default 'baru' check (status in ('baru', 'dihubungi', 'diterima', 'ditolak')),
   created_at timestamptz not null default now()
 );
+
+alter table public.public_registrations
+  alter column registration_link_id drop not null;
+
+alter table public.public_registrations
+  drop constraint if exists public_registrations_registration_link_id_fkey;
+
+alter table public.public_registrations
+  add constraint public_registrations_registration_link_id_fkey
+  foreign key (registration_link_id)
+  references public.registration_links(id)
+  on delete set null;
 
 alter table public.public_registrations
   add column if not exists student_profile_id uuid references public.profiles(id) on delete set null;

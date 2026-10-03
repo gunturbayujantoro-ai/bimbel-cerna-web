@@ -94,6 +94,28 @@ export async function createRegistrationLink(formData: FormData) {
   redirectAdminView('links', 'Tautan pendaftaran berhasil dibuat')
 }
 
+export async function deleteRegistrationLink(formData: FormData) {
+  const { supabase } = await requireAdmin()
+  const linkId = String(formData.get('linkId') ?? '')
+
+  if (!/^[0-9a-f-]{36}$/i.test(linkId)) {
+    redirectAdminView('links', 'Tautan pendaftaran tidak valid')
+  }
+
+  const { data, error } = await supabase
+    .from('registration_links')
+    .delete()
+    .eq('id', linkId)
+    .select('id')
+    .single()
+
+  if (error || !data) {
+    redirectAdminView('links', error?.message ?? 'Tautan pendaftaran tidak ditemukan')
+  }
+
+  redirectAdminView('links', 'Tautan pendaftaran berhasil dihapus')
+}
+
 export async function createStudentAccount(formData: FormData) {
   await requireAdmin()
   const fullName = String(formData.get('fullName') ?? '').trim()
